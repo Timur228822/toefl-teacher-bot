@@ -132,3 +132,50 @@ async def get_user_settings(session: AsyncSession, user_id: int) -> UserSettings
     stmt = select(UserSettings).where(UserSettings.user_id == user_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+# ── Daily Plans ─────────────────────────────────────────────
+
+from app.db.models import DailyPlan
+import json
+
+async def get_daily_plan(session: AsyncSession, user_id: int, target_date: datetime.date) -> DailyPlan | None:
+    """Get the daily plan for a specific date."""
+    # SQLite stores datetime, but we just need to filter by date part. 
+    # To be safe across dialects and for simplicity, let's just use Python filtering
+    # or cast. Let's compare date range for the target_date.
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_of_day = start_of_day + timedelta(days=1)
+    
+    stmt = (
+        select(DailyPlan)
+        .where(DailyPlan.user_id == user_id)
+        .where(DailyPlan.date >= start_of_day)
+        .where(DailyPlan.date < end_of_day)
+        .order_by(DailyPlan.id.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+async def create_daily_plan(
+    session: AsyncSession, 
+    user_id: int, 
+    plan_data: dict
+) -> DailyPlan:
+    """Create a new daily plan."""
+    main_task = json.dumps(plan_data.get("main_task", {}), ensure_ascii=False)
+    drill = json.dumps(plan_data.get("drill", {}), ensure_ascii=False)
+    vocabulary = json.dumps(plan_data.get("vocab", []), ensure_ascii=False)
+    
+    dp = DailyPlan(
+        user_id=user_id,
+        date=datetime.now(timezone.utc),
+        main_task=main_task,
+        drill=drill,
+        vocabulary=vocabulary,
+        completed_step=0
+    )
+    session.add(dp)
+    await session.flush()
+    return dp

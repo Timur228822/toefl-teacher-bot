@@ -110,3 +110,20 @@ class UserSettings(Base):
 
     def __repr__(self) -> str:
         return f"<UserSettings(user_id={self.user_id}, level={self.proficiency_level})>"
+
+
+class DailyPlan(Base):
+    __tablename__ = "daily_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False) # store as datetime but use date part
+    main_task: Mapped[str | None] = mapped_column(Text, nullable=True) # JSON string
+    drill: Mapped[str | None] = mapped_column(Text, nullable=True) # JSON string
+    vocabulary: Mapped[str | None] = mapped_column(Text, nullable=True) # JSON string
+    completed_step: Mapped[int] = mapped_column(Integer, default=0)
+
+    user: Mapped["User"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<DailyPlan(user_id={self.user_id}, date={self.date})>"

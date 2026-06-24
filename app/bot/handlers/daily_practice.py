@@ -19,23 +19,45 @@ router = Router(name="daily_practice")
 
 @router.callback_query(F.data == "menu:daily_practice")
 async def cb_daily_practice(callback: CallbackQuery) -> None:
+    import datetime
+    import json
+    from app.db.crud import get_daily_plan, create_daily_plan, get_or_create_user
+
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+
     async with get_session() as session:
         user = await get_user_by_telegram_id(session, callback.from_user.id)
-        if user:
-            stats = await get_user_stats(session, user.id)
-        else:
-            stats = {"total_sessions": 0}
+        if not user:
+            user = await get_or_create_user(
+                session,
+                telegram_id=callback.from_user.id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name,
+                last_name=callback.from_user.last_name,
+            )
+            
+        db_plan = await get_daily_plan(session, user.id, today)
 
-    plan = generate_daily_plan(stats)
-    main_task = plan["main_task"]
-    drill = plan["drill"]
-    vocab = plan["vocab"]
+        if db_plan:
+            main_task = json.loads(db_plan.main_task) if db_plan.main_task else {}
+            drill = json.loads(db_plan.drill) if db_plan.drill else {}
+            vocab = json.loads(db_plan.vocabulary) if db_plan.vocabulary else []
+        else:
+            stats = await get_user_stats(session, user.id)
+            plan = generate_daily_plan(stats)
+            
+            await create_daily_plan(session, user.id, plan)
+            await session.commit()
+            
+            main_task = plan["main_task"]
+            drill = plan["drill"]
+            vocab = plan["vocab"]
 
     text = (
         "📚 <b>Your Daily Practice Plan (15-25 min)</b>\n\n"
         "Here is what we have for you today:\n\n"
-        f"🎯 <b>Main Task:</b> {main_task['title']}\n"
-        f"🔧 <b>Drill:</b> {drill['title']} - {drill['description']}\n"
+        f"🎯 <b>Main Task:</b> {main_task.get('title', 'Academic Discussion')}\n"
+        f"🔧 <b>Drill:</b> {drill.get('title', 'Drill')} - {drill.get('description', '')}\n"
         f"📖 <b>Vocabulary:</b> {', '.join(vocab)}\n\n"
         "Ready to start?"
     )
