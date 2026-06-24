@@ -18,7 +18,12 @@ async def generate(system_prompt: str, user_prompt: str) -> str:
         "model": settings.ollama_model,
         "prompt": user_prompt,
         "system": system_prompt,
-        "stream": False
+        "stream": False,
+        "options": {
+            "temperature": 0.0,
+            "top_p": 0.1,
+            "seed": 42
+        }
     }
     
     timeout = aiohttp.ClientTimeout(total=120)

@@ -115,7 +115,7 @@ async def process_essay(message: Message, state: FSMContext) -> None:
     
     if issues:
         response_text += "⚠️ <b>Key Issues:</b>\n"
-        for i, issue in enumerate(issues[:3], 1):
+        for i, issue in enumerate(issues[:5], 1):
             response_text += f"{i}. [{issue.get('type')}] <i>{issue.get('example')}</i>\n   👉 Fix: {issue.get('fix')}\n"
         response_text += "\n"
         
