@@ -77,10 +77,7 @@ async def process_essay(message: Message, state: FSMContext) -> None:
     # Save to DB
     score = result.get("score", 0.0)
     async with get_session() as session:
-        # Check user exists or get user id
-        # the crud create_practice_session needs the actual db user id, not just telegram id
-        # Let's import get_user_by_telegram_id
-        from app.db.crud import get_user_by_telegram_id
+        from app.db.crud import get_user_by_telegram_id, log_error
         db_user = await get_user_by_telegram_id(session, message.from_user.id)
         if db_user:
             await create_practice_session(
@@ -92,6 +89,17 @@ async def process_essay(message: Message, state: FSMContext) -> None:
                 feedback=json.dumps(result, ensure_ascii=False),
                 score=score
             )
+            
+            issues = result.get("issues", [])
+            for issue in issues:
+                await log_error(
+                    session,
+                    user_id=db_user.id,
+                    source_type="writing",
+                    error_type=issue.get("type", "unknown"),
+                    example=issue.get("example", ""),
+                    fix=issue.get("fix", "")
+                )
             await session.commit()
 
     # Format result for user

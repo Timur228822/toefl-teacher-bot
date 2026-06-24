@@ -12,7 +12,7 @@ from typing import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import PracticeSession, SkillType, User, UserSettings
+from app.db.models import PracticeSession, SkillType, User, UserSettings, ErrorLog
 
 
 # ── Users ───────────────────────────────────────────────────
@@ -116,6 +116,48 @@ async def get_user_stats(
     total_res = await session.execute(total_q)
     avg_res = await session.execute(avg_q)
     skill_res = await session.execute(skill_q)
+    
+    # top 5 errors
+    from app.db.models import ErrorLog
+    errors_q = (
+        select(ErrorLog.error_type, func.count(ErrorLog.id).label("cnt"))
+        .where(ErrorLog.user_id == user_id)
+        .group_by(ErrorLog.error_type)
+        .order_by(func.count(ErrorLog.id).desc())
+        .limit(5)
+    )
+    errors_res = await session.execute(errors_q)
+    top_errors = [{"type": row.error_type, "count": row.cnt} for row in errors_res.all()]
+    
+    # streak
+    dates_q = (
+        select(PracticeSession.created_at)
+        .where(PracticeSession.user_id == user_id)
+        .order_by(PracticeSession.created_at.desc())
+    )
+    dates_res = await session.execute(dates_q)
+    all_dates = [row.created_at.date() for row in dates_res.all() if row.created_at]
+    
+    streak = 0
+    curr_date = datetime.now(timezone.utc).date()
+    for d in sorted(list(set(all_dates)), reverse=True):
+        if d == curr_date or d == curr_date - timedelta(days=1):
+            streak += 1
+            curr_date = d
+        elif d < curr_date - timedelta(days=1):
+            break
+            
+    # last 7 results (writing/speaking)
+    last_results_q = (
+        select(PracticeSession.skill, PracticeSession.score, PracticeSession.created_at)
+        .where(PracticeSession.user_id == user_id)
+        .where(PracticeSession.skill.in_([SkillType.WRITING, SkillType.SPEAKING]))
+        .where(PracticeSession.score.isnot(None))
+        .order_by(PracticeSession.created_at.desc())
+        .limit(7)
+    )
+    last_res = await session.execute(last_results_q)
+    last_results = [{"skill": row.skill.value, "score": row.score, "date": row.created_at} for row in last_res.all()]
 
     return {
         "total_sessions": total_res.scalar() or 0,
@@ -125,8 +167,23 @@ async def get_user_stats(
             for row in skill_res.all()
         },
         "period_days": days,
+        "top_errors": top_errors,
+        "streak": streak,
+        "last_results": last_results
     }
 
+
+async def log_error(session: AsyncSession, user_id: int, source_type: str, error_type: str, example: str | None, fix: str | None) -> ErrorLog:
+    el = ErrorLog(
+        user_id=user_id,
+        source_type=source_type,
+        error_type=error_type,
+        example=example,
+        fix=fix
+    )
+    session.add(el)
+    await session.flush()
+    return el
 
 async def get_user_settings(session: AsyncSession, user_id: int) -> UserSettings | None:
     stmt = select(UserSettings).where(UserSettings.user_id == user_id)

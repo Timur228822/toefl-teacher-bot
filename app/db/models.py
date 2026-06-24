@@ -127,3 +127,20 @@ class DailyPlan(Base):
 
     def __repr__(self) -> str:
         return f"<DailyPlan(user_id={self.user_id}, date={self.date})>"
+
+
+class ErrorLog(Base):
+    __tablename__ = "error_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False) # e.g. "writing"
+    error_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    example: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<ErrorLog(user_id={self.user_id}, source={self.source_type}, type={self.error_type})>"

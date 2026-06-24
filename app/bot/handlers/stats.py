@@ -32,25 +32,27 @@ async def cb_stats(callback: CallbackQuery) -> None:
         stats = await get_user_stats(session, user.id, days=30)
 
     # ── Format stats message ────────────────────────────────
-    skill_lines = []
-    for skill_name in ("reading", "listening", "speaking", "writing"):
-        data = stats["by_skill"].get(skill_name)
-        if data:
-            emoji = {"reading": "📖", "listening": "🎧", "speaking": "🎙", "writing": "✍️"}[skill_name]
-            skill_lines.append(
-                f"  {emoji} {skill_name.capitalize()}: "
-                f"{data['sessions']} sessions · avg {data['avg_score']}/30"
-            )
+    if stats['total_sessions'] == 0:
+        text = "Not enough practice data yet. Complete Writing or Daily Practice first."
+    else:
+        last_res_str = ""
+        for r in stats.get("last_results", []):
+            last_res_str += f"  • {r['skill'].capitalize()}: {r['score']}/5.0\n"
+        if not last_res_str:
+            last_res_str = "  No results yet.\n"
+            
+        top_errors_str = ""
+        for e in stats.get("top_errors", []):
+            top_errors_str += f"  • {e['type']}: {e['count']} times\n"
+        if not top_errors_str:
+            top_errors_str = "  No errors logged.\n"
 
-    skill_block = "\n".join(skill_lines) if skill_lines else "  No practice sessions yet."
-
-    text = (
-        "📊 <b>Your Statistics</b> (last 30 days)\n\n"
-        f"🔢 Total sessions: <b>{stats['total_sessions']}</b>\n"
-        f"⭐ Average score:  <b>{stats['avg_score']}</b>/30\n\n"
-        f"<b>By skill:</b>\n{skill_block}\n\n"
-        "💡 <i>Keep practicing daily to see your progress!</i>"
-    )
+        text = (
+            "📊 <b>Stats</b>\n\n"
+            f"🔥 <b>Streak:</b> {stats.get('streak', 0)} days\n\n"
+            f"📝 <b>Last results:</b>\n{last_res_str}\n"
+            f"⚠️ <b>Top errors:</b>\n{top_errors_str}"
+        )
 
     await callback.message.edit_text(text, reply_markup=back_to_menu_keyboard(), parse_mode="HTML")
     await callback.answer()
