@@ -36,6 +36,18 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def speaking_transcript_keyboard() -> InlineKeyboardMarkup:
+    """Transcript confirmation / edit buttons for Speaking."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Use this transcript", callback_data="spk:use")],
+            [InlineKeyboardButton(text="✏️ Edit transcript", callback_data="spk:edit")],
+            [InlineKeyboardButton(text="🔁 Record again", callback_data="spk:again")],
+            [InlineKeyboardButton(text="⬅️ Back to Menu", callback_data="menu:main")],
+        ]
+    )
+
+
 def diagnostics_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
