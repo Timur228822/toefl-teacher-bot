@@ -26,7 +26,7 @@ async def generate(system_prompt: str, user_prompt: str) -> str:
         }
     }
     
-    timeout = aiohttp.ClientTimeout(total=120)
+    timeout = aiohttp.ClientTimeout(total=settings.ollama_timeout_seconds)
     
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -39,7 +39,7 @@ async def generate(system_prompt: str, user_prompt: str) -> str:
         logger.error(error_msg)
         raise RuntimeError(error_msg) from e
     except asyncio.TimeoutError as e:
-        error_msg = "Request to Ollama timed out after 120 seconds."
+        error_msg = f"Request to Ollama timed out after {settings.ollama_timeout_seconds} seconds."
         logger.error(error_msg)
         raise RuntimeError(error_msg) from e
     except aiohttp.ClientResponseError as e:

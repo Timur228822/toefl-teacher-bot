@@ -144,3 +144,21 @@ class ErrorLog(Base):
 
     def __repr__(self) -> str:
         return f"<ErrorLog(user_id={self.user_id}, source={self.source_type}, type={self.error_type})>"
+
+
+class DailyPrompt(Base):
+    """Stores the prompt-of-the-day per user + section so it survives restarts."""
+    __tablename__ = "daily_prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    date_str: Mapped[str] = mapped_column(String(10), nullable=False)       # "YYYY-MM-DD"
+    section: Mapped[str] = mapped_column(String(16), nullable=False)        # "speaking" / "writing"
+    prompt_id: Mapped[str] = mapped_column(String(16), nullable=False)      # e.g. "sp_042"
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<DailyPrompt(user_id={self.user_id}, date={self.date_str}, section={self.section})>"

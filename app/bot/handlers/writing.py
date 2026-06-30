@@ -18,6 +18,7 @@ from app.db.crud import create_practice_session
 from app.db.models import SkillType
 from app.db.session import get_session
 from app.services.scoring_writing import evaluate_writing
+from app.data.prompt_bank import pick_writing_prompt
 
 router = Router(name="writing")
 
@@ -26,12 +27,14 @@ class WritingState(StatesGroup):
     waiting_for_essay = State()
 
 
-# A simple default prompt to show the user
-DEFAULT_PROMPT = "Do you agree or disagree with the following statement: Technology has made our lives more complicated. Use specific reasons and examples to support your answer."
-
-
 @router.callback_query(F.data == "menu:writing")
 async def cb_writing(callback: CallbackQuery, state: FSMContext) -> None:
+    chosen = pick_writing_prompt(callback.from_user.id)
+    prompt_str = chosen["prompt"]
+    task_type = chosen.get("type", "independent_essay")
+
+    await state.update_data(prompt=prompt_str, task_type=task_type)
+
     text = (
         "✍️ <b>Writing Practice</b>\n\n"
         "TOEFL Writing has 2 tasks:\n"
@@ -39,7 +42,7 @@ async def cb_writing(callback: CallbackQuery, state: FSMContext) -> None:
         "write a summary (20 min, 150-225 words)\n"
         "  • <b>Academic Discussion</b> — contribute to an online "
         "discussion (10 min, 100+ words)\n\n"
-        f"📝 <b>Today's Prompt:</b>\n<i>{DEFAULT_PROMPT}</i>\n\n"
+        f"📝 <b>Today's Prompt:</b>\n<i>{prompt_str}</i>\n\n"
         "💡 <b>How it works:</b>\n"
         "  Type your essay right here in the chat and send it to me.\n"
         "  I'll evaluate it using AI."
@@ -60,10 +63,14 @@ async def process_essay(message: Message, state: FSMContext) -> None:
         await message.answer("Your essay is too short to score. Please try to write at least 50 words.", reply_markup=back_to_menu_keyboard())
         return
 
+    data = await state.get_data()
+    prompt_str = data.get("prompt", "")
+    task_type = data.get("task_type", "Independent/Academic Discussion")
+
     wait_msg = await message.answer("⏳ Evaluating your essay using Ollama. This might take a minute...", parse_mode="HTML")
     
     try:
-        result = await evaluate_writing(text=user_text, task_type="Independent/Academic Discussion", prompt=DEFAULT_PROMPT)
+        result = await evaluate_writing(text=user_text, task_type=task_type, prompt=prompt_str)
     except RuntimeError as e:
         await wait_msg.edit_text(f"❌ <b>Error:</b> Ollama is not reachable or timed out.\n\n<code>{e}</code>", reply_markup=back_to_menu_keyboard(), parse_mode="HTML")
         await state.clear()
@@ -84,7 +91,7 @@ async def process_essay(message: Message, state: FSMContext) -> None:
                 session=session,
                 user_id=db_user.id,
                 skill=SkillType.WRITING,
-                prompt_text=DEFAULT_PROMPT,
+                prompt_text=prompt_str,
                 user_answer=user_text,
                 feedback=json.dumps(result, ensure_ascii=False),
                 score=score
@@ -127,3 +134,4 @@ async def process_essay(message: Message, state: FSMContext) -> None:
 
     await wait_msg.edit_text(response_text, reply_markup=back_to_menu_keyboard(), parse_mode="HTML")
     await state.clear()
+

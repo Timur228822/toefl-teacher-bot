@@ -16,6 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from app.bot.keyboards import back_to_menu_keyboard, speaking_transcript_keyboard
+from app.data.prompt_bank import get_daily_speaking_prompt, pick_speaking_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +29,17 @@ class SpeakingState(StatesGroup):
     editing_transcript = State()
 
 
-# The actual prompt shown to the user (plain text for LLM scoring)
-SPEAKING_PROMPT = "What is a skill you would like to learn and why?"
-
-SPEAKING_PROMPT_TEXT = (
-    "🎙 <b>Speaking Practice</b>\n\n"
-    "Here is your prompt:\n"
-    f"<i>{SPEAKING_PROMPT}</i>\n\n"
-    "💡 <b>How it works:</b>\n"
-    "  1. Record a voice message (15-45 sec)\n"
-    "  2. I will transcribe and score it\n\n"
-    "👉 Please send your voice message now."
-)
+def _build_prompt_text(prompt_str: str) -> str:
+    """Build the display message for a given speaking prompt string."""
+    return (
+        "🎙 <b>Speaking Practice</b>\n\n"
+        "Here is your prompt:\n"
+        f"<i>{prompt_str}</i>\n\n"
+        "💡 <b>How it works:</b>\n"
+        "  1. Record a voice message (15-45 sec)\n"
+        "  2. I will transcribe and score it\n\n"
+        "👉 Please send your voice message now."
+    )
 
 
 def _transcript_message(transcript: str) -> str:
@@ -49,13 +49,54 @@ def _transcript_message(transcript: str) -> str:
     )
 
 
+# ── helpers ──────────────────────────────────────────────────
+
+async def _resolve_daily_prompt(telegram_id: int) -> dict:
+    """Get today's speaking prompt, persisted in DB."""
+    try:
+        from app.db.session import get_session
+        from app.db.crud import get_or_create_user
+
+        async with get_session() as session:
+            db_user = await get_or_create_user(session, telegram_id)
+            user_id = db_user.id
+
+        return await get_daily_speaking_prompt(user_id, telegram_id)
+    except Exception as e:
+        logger.warning("Daily prompt DB lookup failed, using random: %s", e)
+        return pick_speaking_prompt(telegram_id)
+
+
+# ── Entry point ──────────────────────────────────────────────
+
+@router.callback_query(F.data == "menu:speaking")
+async def cb_speaking(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    chosen = await _resolve_daily_prompt(callback.from_user.id)
+    prompt_str = chosen["prompt"]
+    await state.update_data(prompt=prompt_str)
+    await state.set_state(SpeakingState.waiting_for_voice)
+    await callback.message.edit_text(
+        _build_prompt_text(prompt_str),
+        reply_markup=back_to_menu_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
 def _format_score(result: dict) -> str:
     """Format scoring result into a Telegram-friendly message."""
     score = result.get("score", "?")
     subs = result.get("subs", {})
+    if not isinstance(subs, dict):
+        subs = {}
     issues = result.get("issues", [])
+    if not isinstance(issues, list):
+        issues = []
     model_answer = result.get("model_answer", "")
     drills = result.get("drills", [])
+    if not isinstance(drills, list):
+        drills = []
 
     lines = [
         f"🎙 <b>Speaking Score: {score} / 5.0</b>\n",
@@ -68,6 +109,8 @@ def _format_score(result: dict) -> str:
     if issues:
         lines.append("\n<b>Key Issues:</b>")
         for i, issue in enumerate(issues[:5], 1):
+            if not isinstance(issue, dict):
+                issue = {"type": "general", "example": str(issue), "fix": ""}
             itype = issue.get("type", "")
             example = issue.get("example", "")
             fix = issue.get("fix", "")
@@ -91,10 +134,12 @@ def _format_score(result: dict) -> str:
 @router.callback_query(F.data == "menu:speaking")
 async def cb_speaking(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await state.update_data(prompt=SPEAKING_PROMPT)
+    chosen = pick_speaking_prompt(callback.from_user.id)
+    prompt_str = chosen["prompt"]
+    await state.update_data(prompt=prompt_str)
     await state.set_state(SpeakingState.waiting_for_voice)
     await callback.message.edit_text(
-        SPEAKING_PROMPT_TEXT,
+        _build_prompt_text(prompt_str),
         reply_markup=back_to_menu_keyboard(),
         parse_mode="HTML",
     )
@@ -162,7 +207,7 @@ async def process_voice(message: Message, state: FSMContext) -> None:
 async def cb_use_transcript(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     transcript = data.get("transcript", "")
-    prompt = data.get("prompt", SPEAKING_PROMPT)
+    prompt = data.get("prompt", "")
 
     await callback.message.edit_text(
         "⏳ <b>Scoring your response...</b>", parse_mode="HTML"
@@ -246,9 +291,11 @@ async def process_edited_transcript(message: Message, state: FSMContext) -> None
 
 @router.callback_query(SpeakingState.confirm_transcript, F.data == "spk:again")
 async def cb_record_again(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    prompt_str = data.get("prompt", "")
     await state.set_state(SpeakingState.waiting_for_voice)
     await callback.message.edit_text(
-        "🔁 Let's try again!\n\n" + SPEAKING_PROMPT_TEXT,
+        "🔁 Let's try again!\n\n" + _build_prompt_text(prompt_str),
         reply_markup=back_to_menu_keyboard(),
         parse_mode="HTML",
     )

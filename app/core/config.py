@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     # ── Ollama ──────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
+    ollama_timeout_seconds: int = 300
 
     # ── App ─────────────────────────────────────────────────
     log_level: str = "INFO"

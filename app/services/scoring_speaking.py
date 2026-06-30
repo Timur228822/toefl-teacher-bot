@@ -98,6 +98,68 @@ def _clean_json(text: str) -> str:
     return cleaned.strip()
 
 
+def _normalize_result(raw: Any) -> dict[str, Any]:
+    """Ensure the parsed result is a well-formed dict with correct types."""
+    if not isinstance(raw, dict):
+        raw = {}
+
+    # --- subs ---
+    subs = raw.get("subs", {})
+    if not isinstance(subs, dict):
+        subs = {}
+    # Ollama sometimes returns "topic_relevance" instead of "task_response"
+    if "topic_relevance" in subs and "task_response" not in subs:
+        subs["task_response"] = subs.pop("topic_relevance")
+    for key in ("delivery", "language", "task_response"):
+        try:
+            subs[key] = float(subs.get(key, 0.0))
+        except (TypeError, ValueError):
+            subs[key] = 0.0
+    raw["subs"] = subs
+
+    # --- score ---
+    try:
+        raw["score"] = float(raw["score"])
+    except (KeyError, TypeError, ValueError):
+        # compute from subs if possible
+        vals = [subs[k] for k in ("delivery", "language", "task_response")]
+        avg = sum(vals) / len(vals) if any(v > 0 for v in vals) else 1.0
+        raw["score"] = round(avg, 1)
+
+    # --- issues ---
+    issues = raw.get("issues", [])
+    if not isinstance(issues, list):
+        issues = []
+    normalized_issues: list[dict[str, str]] = []
+    for item in issues:
+        if isinstance(item, dict):
+            normalized_issues.append(item)
+        elif isinstance(item, str):
+            normalized_issues.append(
+                {"type": "general", "example": item,
+                 "fix": "Make your answer clearer and more specific."}
+            )
+        # skip anything else
+    raw["issues"] = normalized_issues
+
+    # --- drills ---
+    drills = raw.get("drills", [])
+    if not isinstance(drills, list):
+        if isinstance(drills, str):
+            drills = [drills]
+        else:
+            drills = []
+    raw["drills"] = [str(d) for d in drills]
+
+    # --- model_answer ---
+    ma = raw.get("model_answer", "")
+    if not isinstance(ma, str):
+        ma = str(ma) if ma else ""
+    raw["model_answer"] = ma
+
+    return raw
+
+
 def _apply_guardrails(result: dict[str, Any], transcript: str) -> dict[str, Any]:
     """Enforce hard score caps based on transcript quality."""
     word_count = len(transcript.split())
@@ -184,12 +246,24 @@ def _apply_guardrails(result: dict[str, Any], transcript: str) -> dict[str, Any]
 async def evaluate_speaking(transcript: str, prompt: str) -> dict[str, Any]:
     """
     Evaluate the speaking transcript against the given prompt using Ollama.
-    Returns structured scoring dict.
+    Returns structured scoring dict.  Never returns an empty dict.
     """
     user_prompt = (
         f"Speaking Prompt (the question the student was asked):\n{prompt}\n\n"
         f"Student's Spoken Response Transcript:\n{transcript}"
     )
+
+    safe_fallback: dict[str, Any] = {
+        "score": 1.0,
+        "subs": {"delivery": 1.0, "language": 1.0, "task_response": 1.0},
+        "issues": [],
+        "model_answer": "(Model answer not available)",
+        "drills": [
+            "Record yourself answering the prompt and listen back",
+            "Practice stating your main point in the first sentence",
+            "Use the OREO structure: Opinion, Reason, Example, Opinion restate",
+        ],
+    }
 
     try:
         response_text = await generate(
@@ -198,20 +272,24 @@ async def evaluate_speaking(transcript: str, prompt: str) -> dict[str, Any]:
 
         try:
             result = json.loads(_clean_json(response_text))
-            return _apply_guardrails(result, transcript)
+            return _apply_guardrails(_normalize_result(result), transcript)
         except json.JSONDecodeError:
             logger.warning(
                 "Failed to parse Ollama JSON for speaking. Retrying with fallback..."
             )
-            retry_text = await generate(
-                system_prompt=_FALLBACK_PROMPT, user_prompt=user_prompt
-            )
-            result = json.loads(_clean_json(retry_text))
-            return _apply_guardrails(result, transcript)
+            try:
+                retry_text = await generate(
+                    system_prompt=_FALLBACK_PROMPT, user_prompt=user_prompt
+                )
+                result = json.loads(_clean_json(retry_text))
+                return _apply_guardrails(_normalize_result(result), transcript)
+            except Exception as e2:
+                logger.error("Fallback retry also failed: %s", e2)
+                return _apply_guardrails(safe_fallback, transcript)
 
     except RuntimeError:
         # Connection / timeout — re-raise for the handler to show a user-friendly error
         raise
     except Exception as e:
         logger.error(f"Error during speaking evaluation: {e}")
-        return {}
+        return _apply_guardrails(safe_fallback, transcript)
